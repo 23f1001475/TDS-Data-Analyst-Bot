@@ -1,3 +1,15 @@
-env/
+# Secrets
 .env
+env/
+.venv/
+
+# Python
 __pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime logs
+run.jsonl
+
+# OS
+.DS_Store
