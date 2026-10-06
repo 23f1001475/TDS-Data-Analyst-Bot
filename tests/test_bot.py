@@ -108,3 +108,24 @@ def test_rate_limit_falls_back_to_secondary_model(monkeypatch):
     assert calls == [bot.GROQ_MODEL, bot.GROQ_FALLBACK_MODEL]
     bot.call_model([{"role": "user", "content": "hi"}])  # primary is now in cooldown
     assert calls[-1] == bot.GROQ_FALLBACK_MODEL and calls.count(bot.GROQ_MODEL) == 1
+
+
+def test_retired_model_404_falls_back(monkeypatch):
+    from openai import NotFoundError
+    import httpx
+
+    calls = []
+
+    def fake_create(model, kwargs):
+        calls.append(model)
+        if model == bot.GROQ_MODEL:
+            req = httpx.Request("POST", "https://x")
+            raise NotFoundError("model_not_found", response=httpx.Response(404, request=req), body=None)
+        return _fake_response(content='{"answer": 1}')
+
+    monkeypatch.setattr(bot, "client", object())
+    monkeypatch.setattr(bot, "_create", fake_create)
+    monkeypatch.setattr(bot, "_primary_blocked_until", 0.0)
+    bot.call_model([{"role": "user", "content": "hi"}])
+    assert calls == [bot.GROQ_MODEL, bot.GROQ_FALLBACK_MODEL]
+    assert bot._primary_blocked_until > 0
