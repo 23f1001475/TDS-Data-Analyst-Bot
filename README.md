@@ -6,6 +6,16 @@
 
 </div>
 
+<div align="center">
+    
+### TDS Data Analyst Bot
+
+### 👉 [Try the bot on Telegram: @tds26_data_analyst_bot](https://t.me/tds26_data_analyst_bot)
+
+[![Open in Telegram](https://img.shields.io/badge/Open%20in-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/tds26_data_analyst_bot)
+
+</div>
+
 ---
 
 ## ✨ Features
