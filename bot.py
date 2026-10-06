@@ -9,7 +9,7 @@ A Telegram bot that answers data-analysis questions as ONE strict JSON object:
 How it works
 ------------
 1. The user's message is saved to ``message.txt`` inside a throw-away work dir.
-2. A Groq-hosted Llama model (OpenAI-compatible API) runs as a small tool-calling
+2. A Groq-hosted open-weight model (OpenAI-compatible API) runs as a small tool-calling
    agent with two tools:
      * ``fetch_url``  - safely download a file/page referenced in the message
      * ``run_python`` - run pandas/numpy code against the downloaded data
@@ -40,7 +40,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from flask import Flask
-from openai import BadRequestError, OpenAI, RateLimitError
+from openai import BadRequestError, NotFoundError, OpenAI, RateLimitError
 
 try:
     from telegram import Update
@@ -81,9 +81,9 @@ def _int_env(name: str, default: int) -> int:
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-# Used automatically when the main model hits its free-tier rate/daily limit.
-GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+# Used automatically when the main model is rate limited OR has been retired by Groq (404).
+GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")
 
 LOG_PUBLIC_URL = os.getenv("LOG_PUBLIC_URL", "none")
 LOCAL_LOG_PATH = os.getenv("LOCAL_LOG_PATH", "run.jsonl")
@@ -100,7 +100,7 @@ MAX_FETCH_BYTES = _int_env("MAX_FETCH_BYTES", 15 * 1024 * 1024)
 FETCH_TIMEOUT = _int_env("FETCH_TIMEOUT", 20)
 PY_TIMEOUT = _int_env("PY_TIMEOUT", 25)
 PY_MEMORY_BYTES = _int_env("PY_MEMORY_MB", 1536) * 1024 * 1024
-TOOL_OUTPUT_LIMIT = 4000  # keeps prompts small for Groq's free tokens-per-minute cap
+TOOL_OUTPUT_LIMIT = 3000  # keeps prompts small for Groq's free tokens-per-minute cap
 TELEGRAM_LIMIT = 4000
 
 ALLOWED_USER_IDS = {
@@ -287,7 +287,7 @@ def tool_fetch_url(url: str, workdir: str) -> str:
 
         ctype = resp.headers.get("Content-Type", "unknown")
         try:
-            preview = data[:1500].decode("utf-8")
+            preview = data[:1200].decode("utf-8")
         except UnicodeDecodeError:
             preview = "[binary content - load it with pandas / python]"
         return (
@@ -380,15 +380,17 @@ def dispatch_tool(name: str, raw_args: str, workdir: str) -> str:
 # --------------------------------------------------------------------------- #
 # Model calls & agent loop
 # --------------------------------------------------------------------------- #
-_primary_blocked_until = 0.0  # epoch seconds; set when the main model is rate limited
+_primary_blocked_until = 0.0  # epoch seconds; set when the main model is rate limited / retired
 
 
 def _create(model, kwargs):
     return client.chat.completions.create(model=model, **kwargs)
 
 
-def call_model(messages, tools=None, json_mode=False, max_tokens=1200):
-    """Call Groq; on rate-limit errors transparently fall back to GROQ_FALLBACK_MODEL."""
+def call_model(messages, tools=None, json_mode=False, max_tokens=2500):
+    """Call Groq. If the main model is rate limited or has been retired (404), transparently
+    switch to GROQ_FALLBACK_MODEL. max_tokens is generous because GPT-OSS models spend
+    part of it on hidden reasoning."""
     global _primary_blocked_until
     if client is None:
         raise RuntimeError("GROQ_API_KEY not configured")
@@ -400,12 +402,17 @@ def call_model(messages, tools=None, json_mode=False, max_tokens=1200):
         kwargs["response_format"] = {"type": "json_object"}
 
     def attempt(model):
+        call_kwargs = dict(kwargs)
+        if "gpt-oss" in model:
+            call_kwargs["extra_body"] = {"reasoning_effort": "low"}  # faster, fewer tokens
         try:
-            return _create(model, kwargs)
+            return _create(model, call_kwargs)
         except BadRequestError:
-            if json_mode:  # provider/model may not support json mode: retry plain
-                kwargs.pop("response_format", None)
-                return _create(model, kwargs)
+            # An optional parameter (json mode / reasoning_effort) may be unsupported: retry bare.
+            if "response_format" in call_kwargs or "extra_body" in call_kwargs:
+                call_kwargs.pop("response_format", None)
+                call_kwargs.pop("extra_body", None)
+                return _create(model, call_kwargs)
             raise
 
     use_fallback = bool(GROQ_FALLBACK_MODEL) and GROQ_FALLBACK_MODEL != GROQ_MODEL
@@ -413,11 +420,15 @@ def call_model(messages, tools=None, json_mode=False, max_tokens=1200):
         return attempt(GROQ_FALLBACK_MODEL)
     try:
         return attempt(GROQ_MODEL)
-    except RateLimitError as e:
+    except (RateLimitError, NotFoundError) as e:
         if not use_fallback:
             raise
-        logger.warning("Rate limited on %s (%s); using fallback %s", GROQ_MODEL, str(e)[:120], GROQ_FALLBACK_MODEL)
-        _primary_blocked_until = time.time() + 60
+        retired = isinstance(e, NotFoundError)
+        logger.warning(
+            "%s on %s (%s); using fallback %s",
+            "Model not found" if retired else "Rate limited", GROQ_MODEL, str(e)[:120], GROQ_FALLBACK_MODEL,
+        )
+        _primary_blocked_until = time.time() + (3600 if retired else 60)
         return attempt(GROQ_FALLBACK_MODEL)
 
 
@@ -451,7 +462,7 @@ def run_agent(text: str):
                 try:
                     resp = call_model(messages, tools=TOOLS)
                 except BadRequestError as e:
-                    # Llama occasionally emits a malformed tool call; recover gracefully.
+                    # Models occasionally emit a malformed tool call; recover gracefully.
                     logger.warning("Tool-call request rejected (%s); forcing final answer", e)
                     steps.append({"step": step, "event": "tool_call_rejected", "detail": str(e)[:300]})
                     break
