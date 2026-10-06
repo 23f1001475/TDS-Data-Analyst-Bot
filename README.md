@@ -2,15 +2,7 @@
 
 # 🤖 TDS26 Data-Analyst Telegram Bot
 
-**A Telegram bot that answers data-analysis questions as strict, machine-readable JSON, powered by Llama 3.3 on Groq.**
-
-[![CI](https://github.com/23f1001475/TDS26-T2-P1-Q3/actions/workflows/lint.yml/badge.svg)](https://github.com/23f1001475/TDS26-T2-P1-Q3/actions)
-![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram&logoColor=white)
-![Groq](https://img.shields.io/badge/LLM-Groq%20%7C%20Llama%203.3%2070B-F55036)
-![Flask](https://img.shields.io/badge/Flask-Health%20Check-000000?logo=flask&logoColor=white)
-![Deploy](https://img.shields.io/badge/Deploy-Render-46E3B7?logo=render&logoColor=black)
-![License](https://img.shields.io/badge/License-MIT-green)
+**A Telegram bot that answers data-analysis questions as strict, machine-readable JSON, powered by GPT-OSS on Groq.**
 
 </div>
 
@@ -34,7 +26,7 @@
 flowchart LR
     U[👤 User] -->|text message| T[Telegram]
     T -->|polling| B[bot.py]
-    B -->|system + user prompt| G[Groq API<br/>Llama 3.3 70B]
+    B -->|system + user prompt| G[Groq API<br/>GPT-OSS 120B]
     G -->|raw reply| B
     B -->|validate / repair JSON| B
     B -->|append| L[(run.jsonl)]
@@ -46,7 +38,7 @@ flowchart LR
 ```
 
 1. A user sends a message; it is also saved to `message.txt` in a temporary work directory.
-2. The Llama agent decides which tools to call: `fetch_url` to download data, `run_python` to analyse it. It loops for up to `MAX_AGENT_STEPS`.
+2. The model agent decides which tools to call: `fetch_url` to download data, `run_python` to analyse it. It loops for up to `MAX_AGENT_STEPS`.
 3. The final text is parsed, validated and, if needed, repaired into `{"answer", "log_url"}`.
 4. `log_url` is always overwritten with your configured `LOG_PUBLIC_URL`.
 5. The run (with all tool steps) is logged locally, pushed to the Gist, and the JSON is sent back. Replies over 4000 characters are sent as `answer.json`.
@@ -93,8 +85,8 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` | ✅ | n/a | Token from [@BotFather](https://t.me/BotFather) |
 | `GROQ_API_KEY` | ✅ | n/a | Key from [console.groq.com](https://console.groq.com) |
 | `GROQ_BASE_URL` | ❌ | `https://api.groq.com/openai/v1` | OpenAI-compatible endpoint |
-| `GROQ_MODEL` | ❌ | `llama-3.3-70b-versatile` | Model used for answers |
-| `GROQ_FALLBACK_MODEL` | ❌ | `llama-3.1-8b-instant` | Used automatically when the main model hits Groq's free-tier limit |
+| `GROQ_MODEL` | ❌ | `openai/gpt-oss-120b` | Model used for answers |
+| `GROQ_FALLBACK_MODEL` | ❌ | `openai/gpt-oss-20b` | Used automatically when the main model is rate limited or retired |
 | `LOG_PUBLIC_URL` | ✅ | `none` | Public raw URL of your Gist log, without the commit hash: `https://gist.githubusercontent.com/<user>/<id>/raw/run.jsonl` |
 | `LOCAL_LOG_PATH` | ❌ | `run.jsonl` | Local JSONL log file |
 | `GITHUB_TOKEN` | ❌ | n/a | Token with `gist` scope, for log upload |
@@ -174,6 +166,15 @@ Issues and pull requests are welcome. For larger changes, please open an issue f
 ## 📄 License
 
 Released under the [MIT License](LICENSE).
+
+---
+
+## Author
+
+**Vivek Mittal**
+
+* [LinkedIn](https://www.linkedin.com/in/vivek-mittal-574a31250/)
+* [GitHub](https://github.com/23f1001475)
 
 ---
 
